@@ -42,7 +42,7 @@ def perform_inference_with_currently_deployed_model(forecast_config_fp: str, loa
 
 
 @task
-def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str) -> str :
+def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str) -> str:
     import pandas as pd
     import numpy as np
     date_range = pd.date_range(start='2020-04-01', end='2020-12-31', freq='15min')
