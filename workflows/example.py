@@ -44,30 +44,18 @@ def perform_inference_with_currently_deployed_model(forecast_config_fp: str, loa
 @task
 def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str) -> str:
     import pandas as pd
-    import numpy as np
-    date_range = pd.date_range(start='2020-04-01', end='2020-12-31', freq='15min')
-    data = {
-        load_type: np.random.rand(len(date_range)) * 100
-    }
-    df = pd.DataFrame(data, index=date_range)
-    fp = "/tmp/unseen_data.csv"
+
+    fp = f"../data/unseen_{load_type}.csv"
+    df = pd.read_csv(fp)
     return fp
 
 
 @task(container_image=ml_image_spec)
-def fetch_training_data(training_data_fp: str) -> str:
+def fetch_training_data(training_data_fp: str, load_type: str) -> str:
     import pandas as pd
-    import numpy as np
-    import mlflow
-
-    date_range = pd.date_range(start='2020-01-01', end='2020-03-31', freq='15min')
-    data = {
-        "site": np.random.rand(len(date_range)) * 100,
-        "pv": np.random.rand(len(date_range)) * 100,
-        'temperature': np.random.rand(len(date_range)) * 100,
-    }
-    df = pd.DataFrame(data, index=date_range)
-    fp = "/tmp/training_data.csv"
+    
+    fp = f"../data/training_{load_type}.csv"
+    df = pd.read_csv(fp)
     return fp
 
 
@@ -83,8 +71,8 @@ def calculate_charges(data_and_forecasts: typing.Dict[str, typing.Dict[str, str]
 def analyze_data_and_forecasts(site_metadata: SiteTrainingMetaData) -> typing.Dict[str, typing.Dict[str, str]]:
     forecasts_dict = {}
     data_dict = {}
-    training_data = fetch_training_data(training_data_fp=site_metadata.training_data_fp)
     for load_type in site_metadata.load_types:
+        training_data = fetch_training_data(training_data_fp=site_metadata.training_data_fp, load_type=load_type)
         unseen_data = fetch_unseen_data(load_type=load_type, training_data_end_date=site_metadata.training_data_end_date, site_id=site_metadata.site_id)
         capture_data_metrics(training_data=training_data, unseen_data=unseen_data)
 
@@ -110,7 +98,7 @@ def retrieve_site_metadata(site_name: str) -> SiteTrainingMetaData:
         load_types=["site", "pv"],
         forecast_config_fp="s3://path/to/forecast/config",
         forecast_models_version="4.3.0",
-        training_data_fp="s3://path/to/training/data",
+        training_data_fp="s3://path/to/training_site.csv/data",
         training_data_end_date="2020-03-31T23:45:00Z",
     )
 
