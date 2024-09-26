@@ -137,3 +137,5 @@ _pb_output/*
 
 flyte-package.tgz
 mlruns
+mlartifacts
+plotly
