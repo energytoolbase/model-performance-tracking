@@ -91,6 +91,8 @@ def perform_inference_with_currently_deployed_model(load_type: str, data: str, s
             mlflow.set_tag("flyte_execution_id", execution_id)
             mlflow.log_figure(fig, figure_artifact_file)
             mlflow.log_params(site_metadata.to_dict())
+            mlflow.set_tag("site_name", site_metadata.site_name)
+            mlflow.set_tag("load_type", load_type)
     else:
         run_id = runs.iloc[0]["run_id"]
         with mlflow.start_run(run_id=run_id):
