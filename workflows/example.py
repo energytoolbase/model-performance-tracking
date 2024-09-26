@@ -33,8 +33,8 @@ def capture_forecast_metrics(true_data: pd.DataFrame, forecast_data: pd.DataFram
     from sklearn.metrics import mean_squared_error, mean_absolute_error
     import mlflow
 
-    rmse = mean_squared_error(true_data[load_type], forecast_data[load_type], squared=False)
-    mae = mean_absolute_error(true_data[load_type], forecast_data[load_type])
+    rmse = round(mean_squared_error(true_data[load_type], forecast_data[load_type], squared=False), 2)
+    mae = round(mean_absolute_error(true_data[load_type], forecast_data[load_type]), 2)
 
     mlflow.set_experiment("model-performance-tracking")
 
@@ -58,7 +58,7 @@ def capture_data_metrics(training_data: str, unseen_data: str):
 
 
 @task(container_image=ml_image_spec)
-def perform_inference_with_currently_deployed_model(forecast_config_fp: str, load_type: str, data: str, site_name: str) -> typing.Tuple[pd.DataFrame, pd.DataFrame]:
+def perform_inference_with_currently_deployed_model(load_type: str, data: str, site_metadata: SiteTrainingMetaData) -> typing.Tuple[pd.DataFrame, pd.DataFrame]:
     import pandas as pd
     import numpy as np
     import random
@@ -82,18 +82,20 @@ def perform_inference_with_currently_deployed_model(forecast_config_fp: str, loa
     runs = mlflow.search_runs(
         experiment_names=["model-performance-tracking"],
         filter_string=f"tags.mlflow.runName = "
-                      f"'{site_name}_{load_type}'"
+                      f"'{site_metadata.site_name}_{load_type}'"
                       f"and tags.flyte_execution_id = '{execution_id}'",
     )
     figure_artifact_file = f"{load_type}_forecasts_vs_truth.html"
     if len(runs) == 0:
-        with mlflow.start_run(run_name=f"{site_name}_{load_type}"):
+        with mlflow.start_run(run_name=f"{site_metadata.site_name}_{load_type}"):
             mlflow.set_tag("flyte_execution_id", execution_id)
             mlflow.log_figure(fig, figure_artifact_file)
+            mlflow.log_params(site_metadata.to_dict())
     else:
         run_id = runs.iloc[0]["run_id"]
         with mlflow.start_run(run_id=run_id):
             mlflow.log_figure(fig, figure_artifact_file)
+            mlflow.log_params(site_metadata.to_dict())
 
     return true_df, forecast_df
 
@@ -118,7 +120,7 @@ def calculate_charges(data_and_forecasts: typing.Dict[str, typing.Dict[str, pd.D
     import mlflow
 
     charges_with_perfect = random.randint(0, 10000)
-    charges_with_forecasts = charges_with_perfect * random.uniform(1.1, 2)
+    charges_with_forecasts = round(charges_with_perfect * random.uniform(1.1, 2), 2)
 
     execution_id = current_context().execution_id.name
     for load_type in site_metadata.load_types:
@@ -145,10 +147,9 @@ def analyze_data_and_forecasts(site_metadata: SiteTrainingMetaData) -> typing.Di
         capture_data_metrics(training_data=training_data, unseen_data=unseen_data)
 
         true_data, forecast_data = perform_inference_with_currently_deployed_model(
-            forecast_config_fp=site_metadata.forecast_config_fp,
             load_type=load_type,
             data=unseen_data,
-            site_name=site_metadata.site_name,
+            site_metadata=site_metadata,
         )
         forecasts_dict[load_type] = forecast_data
         capture_forecast_metrics(true_data=true_data, forecast_data=forecast_data, load_type=load_type, site_name=site_metadata.site_name)
