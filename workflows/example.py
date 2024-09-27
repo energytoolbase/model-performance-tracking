@@ -43,7 +43,8 @@ def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str)
     from pathlib import Path
     date_range = pd.date_range(start='2020-04-01', end='2020-04-30', freq='15min')
     data = {
-        load_type: np.random.rand(len(date_range)) * 100
+        load_type: np.random.rand(len(date_range)) * 100,
+        'temperature': np.random.rand(len(date_range)) * 100,
     }
     df = pd.DataFrame(data, index=date_range)
     # write to local path
@@ -67,7 +68,7 @@ def fetch_training_data(training_data_fp: str) -> FlyteFile:
     data = {
         "site": np.random.rand(len(date_range)) * 100,
         "pv": np.random.rand(len(date_range)) * 100,
-        'temperature': np.random.rand(len(date_range)) * 100,
+        'temperature': np.random.normal(loc=0, scale=2, size=len(date_range)) * 200,
     }
     df = pd.DataFrame(data, index=date_range)
     # write to local path
@@ -138,14 +139,14 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
     reference_data = pd.read_csv(reference_data_file)
     current_data = pd.read_csv(current_data_file)
 
-    reference_data = reference_data[load_type].to_frame()
-    current_data = current_data[load_type].to_frame()
+    reference_data = reference_data[[load_type, "temperature"]]
+    current_data = current_data[[load_type, "temperature"]]
 
 
     # Date drift report
     data_drift_report = Report(metrics=[DataDriftPreset()])
     column_mapping = ColumnMapping()
-    column_mapping.numerical_features = [load_type]
+    column_mapping.numerical_features = [load_type, "temperature"]
     data_drift_report.run(reference_data=reference_data, current_data=current_data, column_mapping=column_mapping)
     data_drift_report.save_html("data_drift_report.html")
     report = data_drift_report.as_dict()
