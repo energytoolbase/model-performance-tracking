@@ -74,7 +74,7 @@ def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str)
     return FlyteFile(path=data_path_local)
 
 @task(container_image=ml_image_spec)
-def perform_inference_with_currently_deployed_model(load_type: str, data: str, site_metadata: SiteTrainingMetaData) -> typing.Tuple[pd.DataFrame, pd.DataFrame]:
+def perform_inference_with_currently_deployed_model(load_type: str, data: FlyteFile, site_metadata: SiteTrainingMetaData) -> typing.Tuple[pd.DataFrame, pd.DataFrame]:
     import pandas as pd
     import numpy as np
     import random
@@ -116,14 +116,6 @@ def perform_inference_with_currently_deployed_model(load_type: str, data: str, s
             mlflow.log_params(site_metadata.to_dict())
 
     return true_df, forecast_df
-
-
-
-
-@task
-def perform_inference_with_currently_deployed_model(forecast_config_fp: str, load_type: str, data: str) -> str:
-    fp = "/tmp/forecasts.csv"
-    return fp
 
 
 @task
@@ -184,7 +176,6 @@ def calculate_charges(data_and_forecasts: typing.Dict[str, typing.Dict[str, str]
             mlflow.log_metric(f"charges_with_site_{site_metadata.site_model_type}_and_pv_{site_metadata.pv_model_type}", charges_with_forecasts)
 
 
-
 @dynamic
 def analyze_data_and_forecasts(site_metadata: SiteTrainingMetaData) -> typing.Dict[str, typing.Dict[str, pd.DataFrame]]:
     forecasts_dict = {}
@@ -200,7 +191,6 @@ def analyze_data_and_forecasts(site_metadata: SiteTrainingMetaData) -> typing.Di
             data=unseen_data,
             site_metadata=site_metadata,
         )
-        forecasts_dict[load_type] = forecast_data
         capture_forecast_metrics(true_data=true_data, forecast_data=forecast_data, load_type=load_type, site_name=site_metadata.site_name)
 
     data_and_forecasts = {
@@ -288,7 +278,7 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
 def wf(site_name: str):
     site_metadata = retrieve_site_metadata(site_name=site_name)
     data_and_forecasts = analyze_data_and_forecasts(site_metadata=site_metadata)
-    calculate_charges(data_and_forecasts=data_and_forecasts, site_metadata=site_metadata)
+    # calculate_charges(data_and_forecasts=data_and_forecasts, site_metadata=site_metadata)
 
 
 if __name__ == "__main__":
