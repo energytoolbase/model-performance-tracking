@@ -135,7 +135,7 @@ def fetch_training_data(training_data_fp: str, load_type: str) -> FlyteFile:
 
 
 @task
-def calculate_charges(data_and_forecasts: typing.Dict[str, typing.Dict[str, str]], site_metadata: SiteTrainingMetaData):
+def calculate_charges(data_and_forecasts: typing.Dict[str, typing.Dict[str, pd.DataFrame]], site_metadata: SiteTrainingMetaData):
     import random
     import mlflow
 
@@ -269,7 +269,7 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
 def wf(site_name: str):
     site_metadata = retrieve_site_metadata(site_name=site_name)
     data_and_forecasts = analyze_data_and_forecasts(site_metadata=site_metadata)
-    # calculate_charges(data_and_forecasts=data_and_forecasts, site_metadata=site_metadata)
+    calculate_charges(data_and_forecasts=data_and_forecasts, site_metadata=site_metadata)
 
 
 if __name__ == "__main__":
