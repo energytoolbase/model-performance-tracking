@@ -118,19 +118,6 @@ def perform_inference_with_currently_deployed_model(load_type: str, data: FlyteF
     return true_df, forecast_df
 
 
-@task
-def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str) -> str:
-    import pandas as pd
-    import numpy as np
-    date_range = pd.date_range(start='2020-04-01', end='2020-12-31', freq='15min')
-    data = {
-        load_type: np.random.rand(len(date_range)) * 100
-    }
-    df = pd.DataFrame(data, index=date_range)
-    fp = "/tmp/unseen_data.csv"
-    return fp
-
-
 @task(container_image=ml_image_spec)
 def fetch_training_data(training_data_fp: str, load_type: str) -> FlyteFile:
     import pandas as pd
