@@ -247,8 +247,8 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
         mlflow.log_artifact("data_drift_report.html")
 
         mlflow.log_artifact("data_drift_test_suite.html")
-        mlflow.log_metric("success_tests", test_suite["summary"]["success_tests"])
-        mlflow.log_metric("Failed_tests", test_suite["summary"]["failed_tests"])
+        mlflow.log_metric("success_drift_tests_number", test_suite["summary"]["success_tests"])
+        mlflow.log_metric("failed_drift_tests_number", test_suite["summary"]["failed_tests"])
         for feature in drifts:
             mlflow.log_metric(f"{feature[0]}_drift_score", round(feature[1], 3))
 
