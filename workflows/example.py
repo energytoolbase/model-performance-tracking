@@ -37,13 +37,16 @@ def capture_forecast_metrics(true_data: pd.DataFrame, forecast_data: pd.DataFram
     import mlflow
     from evidently.report import Report
     from evidently.metric_preset import RegressionPreset
+    import numpy as np
     # Combine them into a dataframe
     df = pd.DataFrame({
         'target': true_data[load_type],
         'prediction': forecast_data[load_type]
     })
+    reference_data = df[['target', 'prediction']].copy()
+    reference_data["prediction"] = reference_data["prediction"] + np.random.normal(0, 0.05, size=len(forecast_data))
     report = Report(metrics=[RegressionPreset()])
-    report.run(reference_data=df[['target', 'prediction']], current_data=df[['target', 'prediction']])
+    report.run(reference_data=reference_data, current_data=df[['target', 'prediction']])
     report.save_html("regression_report.html")
     rmse = round(mean_squared_error(true_data[load_type], forecast_data[load_type], squared=False), 2)
     mae = round(mean_absolute_error(true_data[load_type], forecast_data[load_type]), 2)
