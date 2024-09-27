@@ -1,0 +1,6 @@
+id: "model-performance-tracking"
+name: "model-performance-tracking"
+labels:
+   values:
+     app: flyte
+description: "Some description for the project."
