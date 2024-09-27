@@ -5,13 +5,16 @@ from dataclasses import dataclass
 from typing import List
 from flytekit.types.file import FlyteFile
 from flytekit import task, workflow, dynamic, ImageSpec
+
+import pandas as pd
+from flytekit import task, workflow, dynamic, ImageSpec, current_context
 from mashumaro.mixins.json import DataClassJSONMixin
 import flytekit
 import os
 
 ml_image_spec = ImageSpec(
     base_image="cr.flyte.org/flyteorg/flytekit:py3.10-1.12.0",
-    packages=["mlflow==2.13.2", "evidently==0.4.37"],
+    packages=["mlflow==2.13.2", "scikit-learn==1.5.1", "plotly==5.24.1", "evidently==0.4.37"],
     registry="jielian0709",
 )
 
@@ -21,20 +24,35 @@ class SiteTrainingMetaData(DataClassJSONMixin):
     site_id: str
     load_types: List[str]
     forecast_config_fp: str
+    site_model_type: str
+    pv_model_type: str
     forecast_models_version: str
     training_data_fp: str
     training_data_end_date: str
 
 
-@task
-def capture_forecast_metrics(true_data: FlyteFile, forecast_data: str):
-    pass
+@task(container_image=ml_image_spec)
+def capture_forecast_metrics(true_data: pd.DataFrame, forecast_data: pd.DataFrame, load_type: str, site_name: str):
+    from sklearn.metrics import mean_squared_error, mean_absolute_error
+    import mlflow
 
-@task
-def perform_inference_with_currently_deployed_model(forecast_config_fp: str, load_type: str, data: FlyteFile) -> str:
-    fp = "/tmp/forecasts.csv"
-    return fp
+    rmse = round(mean_squared_error(true_data[load_type], forecast_data[load_type], squared=False), 2)
+    mae = round(mean_absolute_error(true_data[load_type], forecast_data[load_type]), 2)
 
+    mlflow.set_experiment("model-performance-tracking")
+
+    execution_id = current_context().execution_id.name
+    runs = mlflow.search_runs(
+        experiment_names=["model-performance-tracking"],
+        filter_string=f"tags.mlflow.runName = "
+                      f"'{site_name}_{load_type}'"
+                      f"and tags.flyte_execution_id = '{execution_id}'",
+    )
+
+    run_id = runs.iloc[0]["run_id"]
+    with mlflow.start_run(run_id=run_id):
+        mlflow.log_metric("rmse", rmse)
+        mlflow.log_metric("mae", mae)
 
 @task(container_image=ml_image_spec)
 def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str) -> FlyteFile:
@@ -56,18 +74,53 @@ def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str)
     df.to_csv(data_path_local)
     return FlyteFile(path=data_path_local)
 
-
 @task(container_image=ml_image_spec)
-def fetch_training_data(training_data_fp: str) -> FlyteFile:
+def perform_inference_with_currently_deployed_model(load_type: str, data: FlyteFile, site_metadata: SiteTrainingMetaData, data_drift_metrics: str) -> typing.Tuple[pd.DataFrame, pd.DataFrame]:
     import pandas as pd
     import numpy as np
+    import random
+    import plotly.express as px
     import mlflow
+
+    date_range = pd.date_range(start="2020-04-01", end="2020-04-30", freq="15min")
+
+    true_data = {load_type: np.random.rand(len(date_range)) * 100, "source": ["true"] * len(date_range)}
+    forecast_data = {load_type: [x * random.uniform(0.7, 1.3) for x in true_data[load_type]], "source": ["forecast"] * len(date_range)}
+
+    true_df = pd.DataFrame(true_data, index=date_range)
+    forecast_df = pd.DataFrame(forecast_data, index=date_range)
+    df = pd.concat([true_df, forecast_df])
+
+    fig = px.line(df, x=df.index, y=load_type, color="source")
+
+    mlflow.set_experiment("model-performance-tracking")
+
+    execution_id = current_context().execution_id.name
+    runs = mlflow.search_runs(
+        experiment_names=["model-performance-tracking"],
+        filter_string=f"tags.mlflow.runName = "
+                      f"'{site_metadata.site_name}_{load_type}'"
+                      f"and tags.flyte_execution_id = '{execution_id}'",
+    )
+    figure_artifact_file = f"{load_type}_forecasts_vs_truth.html"
+
+    run_id = runs.iloc[0]["run_id"]
+    with mlflow.start_run(run_id=run_id):
+        mlflow.log_figure(fig, figure_artifact_file)
+        mlflow.log_params(site_metadata.to_dict())
+
+    return true_df, forecast_df
+
+
+@task(container_image=ml_image_spec)
+def fetch_training_data(training_data_fp: str, load_type: str) -> FlyteFile:
+    import pandas as pd
+    import numpy as np
     from pathlib import Path
 
     date_range = pd.date_range(start='2020-01-01', end='2020-01-31', freq='15min')
     data = {
-        "site": np.random.rand(len(date_range)) * 100,
-        "pv": np.random.rand(len(date_range)) * 100,
+        load_type: np.random.rand(len(date_range)) * 100,
         'temperature': np.random.normal(loc=0, scale=2, size=len(date_range)) * 200,
     }
     df = pd.DataFrame(data, index=date_range)
@@ -84,30 +137,45 @@ def fetch_training_data(training_data_fp: str) -> FlyteFile:
 @task
 def calculate_charges(data_and_forecasts: typing.Dict[str, typing.Dict[str, str]], site_metadata: SiteTrainingMetaData):
     import random
+    import mlflow
 
+    mlflow.set_experiment("model-performance-tracking")
     charges_with_perfect = random.randint(0, 10000)
-    charges_with_forecasts = charges_with_perfect * random.uniform(1.1, 2)
+    charges_with_forecasts = round(charges_with_perfect * random.uniform(1.1, 2), 2)
 
+    execution_id = current_context().execution_id.name
+    for load_type in site_metadata.load_types:
+        runs = mlflow.search_runs(
+            experiment_names=["model-performance-tracking"],
+            filter_string=f"tags.mlflow.runName = "
+                          f"'{site_metadata.site_name}_{load_type}'"
+                          f"and tags.flyte_execution_id = '{execution_id}'",
+        )
+
+        run_id = runs.iloc[0]["run_id"]
+        with mlflow.start_run(run_id=run_id):
+            mlflow.log_metric("charges_with_perfect", charges_with_perfect)
+            mlflow.log_metric(f"charges_with_site_{site_metadata.site_model_type}_and_pv_{site_metadata.pv_model_type}", charges_with_forecasts)
 
 
 @dynamic
-def analyze_data_and_forecasts(site_metadata: SiteTrainingMetaData) -> typing.Dict[str, typing.Dict[str, str]]:
+def analyze_data_and_forecasts(site_metadata: SiteTrainingMetaData) -> typing.Dict[str, typing.Dict[str, pd.DataFrame]]:
     forecasts_dict = {}
     data_dict = {}
-    training_data = fetch_training_data(training_data_fp=site_metadata.training_data_fp)
     for load_type in site_metadata.load_types:
+        training_data = fetch_training_data(training_data_fp=site_metadata.training_data_fp, load_type=load_type)
         unseen_data = fetch_unseen_data(load_type=load_type, training_data_end_date=site_metadata.training_data_end_date, site_id=site_metadata.site_id)
 
-        capture_data_drifting_metrics(reference_data_file=training_data, current_data_file=unseen_data, site_name=site_metadata.site_name, load_type=load_type)
-        forecasts = perform_inference_with_currently_deployed_model(
-            forecast_config_fp=site_metadata.forecast_config_fp,
+        success = capture_data_drifting_metrics(reference_data_file=training_data, current_data_file=unseen_data, site_name=site_metadata.site_name, load_type=load_type)
+
+        true_data, forecast_data = perform_inference_with_currently_deployed_model(
             load_type=load_type,
-            data=unseen_data
+            data=unseen_data,
+            site_metadata=site_metadata,
+            data_drift_metrics=success
         )
-        forecasts_dict[load_type] = forecasts
-        capture_forecast_metrics(true_data=unseen_data, forecast_data=forecasts)
-        forecasts_dict={}
-        data_dict={}
+        capture_forecast_metrics(true_data=true_data, forecast_data=forecast_data, load_type=load_type, site_name=site_metadata.site_name)
+
     data_and_forecasts = {
         "forecasts": forecasts_dict,
         "data": data_dict
@@ -121,13 +189,15 @@ def retrieve_site_metadata(site_name: str) -> SiteTrainingMetaData:
         site_id="123",
         load_types=["site", "pv"],
         forecast_config_fp="s3://path/to/forecast/config",
+        site_model_type="ml",
+        pv_model_type="cap",
         forecast_models_version="4.3.0",
         training_data_fp="s3://path/to/training/data",
         training_data_end_date="2020-03-31T23:45:00Z",
     )
 
 @task(container_image=ml_image_spec)
-def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_file: FlyteFile, site_name: str, load_type: str):
+def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_file: FlyteFile, site_name: str, load_type: str) -> str:
     from evidently.report import Report
     from evidently.metric_preset import DataDriftPreset
     from evidently import ColumnMapping
@@ -139,14 +209,15 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
     reference_data = pd.read_csv(reference_data_file)
     current_data = pd.read_csv(current_data_file)
 
-    reference_data = reference_data[[load_type, "temperature"]]
-    current_data = current_data[[load_type, "temperature"]]
+    numerical_features = [load_type, "temperature"]
 
+    reference_data = reference_data[numerical_features]
+    current_data = current_data[numerical_features]
 
     # Date drift report
     data_drift_report = Report(metrics=[DataDriftPreset()])
     column_mapping = ColumnMapping()
-    column_mapping.numerical_features = [load_type, "temperature"]
+    column_mapping.numerical_features = numerical_features
     data_drift_report.run(reference_data=reference_data, current_data=current_data, column_mapping=column_mapping)
     data_drift_report.save_html("data_drift_report.html")
     report = data_drift_report.as_dict()
@@ -156,9 +227,7 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
 
     # Data drift test report
     data_drift_test_suite = TestSuite(tests=[DataDriftTestPreset()])
-    data_drift_test_suite.run(reference_data=reference_data, current_data=current_data,
-                               # column_mapping=column_mapping
-                               )
+    data_drift_test_suite.run(reference_data=reference_data, current_data=current_data, column_mapping=column_mapping)
     data_drift_test_suite.save_html("data_drift_test_suite.html")
     test_suite = data_drift_test_suite.as_dict()
     drifts = []
@@ -166,7 +235,15 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
         drifts.append((feature, report["metrics"][1]["result"]["drift_by_columns"][feature]["drift_score"]))
     execution_id = flytekit.current_context().execution_id.name
     execution_start_time = flytekit.current_context().execution_date
-    with mlflow.start_run(run_name=f"{site_name}_{load_type}" ) as run:
+
+    runs = mlflow.search_runs(
+        experiment_names=["model-performance-tracking"],
+        filter_string=f"tags.mlflow.runName = "
+                      f"'{site_name}_{load_type}'"
+                      f"and tags.flyte_execution_id = '{execution_id}'",
+    )
+
+    with mlflow.start_run(run_name=f"{site_name}_{load_type}"):
         mlflow.log_artifact("data_drift_report.html")
 
         mlflow.log_artifact("data_drift_test_suite.html")
@@ -175,23 +252,24 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
         for feature in drifts:
             mlflow.log_metric(f"{feature[0]}_drift_score", round(feature[1], 3))
 
-
         mlflow.set_tags(
             {
                 "load_type": load_type,
                 "flyte_execution_id": execution_id,
                 "flyte_execution_date": execution_start_time,
                 "site_name": site_name,
-                "model_name":f"{load_type}_model"
+                "model_name": f"{load_type}_model"
             }
         )
+
+    return "Data drift metrics captured"
 
 
 @workflow
 def wf(site_name: str):
     site_metadata = retrieve_site_metadata(site_name=site_name)
     data_and_forecasts = analyze_data_and_forecasts(site_metadata=site_metadata)
-    calculate_charges(data_and_forecasts=data_and_forecasts, site_metadata=site_metadata)
+    # calculate_charges(data_and_forecasts=data_and_forecasts, site_metadata=site_metadata)
 
 
 if __name__ == "__main__":
