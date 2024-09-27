@@ -3,3 +3,4 @@ pandas
 scikit-learn
 mlflow==2.16.2
 plotly==5.24.1
+evidently==0.4.37
