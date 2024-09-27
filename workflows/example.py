@@ -61,7 +61,8 @@ def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str)
     from pathlib import Path
     date_range = pd.date_range(start='2020-04-01', end='2020-04-30', freq='15min')
     data = {
-        load_type: np.random.rand(len(date_range)) * 100
+        load_type: np.random.rand(len(date_range)) * 100,
+        'temperature': np.random.rand(len(date_range)) * 100,
     }
     df = pd.DataFrame(data, index=date_range)
     # write to local path
@@ -120,7 +121,7 @@ def fetch_training_data(training_data_fp: str, load_type: str) -> FlyteFile:
     date_range = pd.date_range(start='2020-01-01', end='2020-01-31', freq='15min')
     data = {
         load_type: np.random.rand(len(date_range)) * 100,
-        'temperature': np.random.rand(len(date_range)) * 100,
+        'temperature': np.random.normal(loc=0, scale=2, size=len(date_range)) * 200,
     }
     df = pd.DataFrame(data, index=date_range)
     # write to local path
@@ -208,14 +209,15 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
     reference_data = pd.read_csv(reference_data_file)
     current_data = pd.read_csv(current_data_file)
 
-    reference_data = reference_data[load_type].to_frame()
-    current_data = current_data[load_type].to_frame()
+    numerical_features = [load_type, "temperature"]
 
+    reference_data = reference_data[numerical_features]
+    current_data = current_data[numerical_features]
 
     # Date drift report
     data_drift_report = Report(metrics=[DataDriftPreset()])
     column_mapping = ColumnMapping()
-    column_mapping.numerical_features = [load_type]
+    column_mapping.numerical_features = numerical_features
     data_drift_report.run(reference_data=reference_data, current_data=current_data, column_mapping=column_mapping)
     data_drift_report.save_html("data_drift_report.html")
     report = data_drift_report.as_dict()
@@ -225,9 +227,7 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
 
     # Data drift test report
     data_drift_test_suite = TestSuite(tests=[DataDriftTestPreset()])
-    data_drift_test_suite.run(reference_data=reference_data, current_data=current_data,
-                               # column_mapping=column_mapping
-                               )
+    data_drift_test_suite.run(reference_data=reference_data, current_data=current_data, column_mapping=column_mapping)
     data_drift_test_suite.save_html("data_drift_test_suite.html")
     test_suite = data_drift_test_suite.as_dict()
     drifts = []
