@@ -140,16 +140,14 @@ def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str)
 
 
 @task(container_image=ml_image_spec)
-def fetch_training_data(training_data_fp: str) -> FlyteFile:
+def fetch_training_data(training_data_fp: str, load_type: str) -> FlyteFile:
     import pandas as pd
     import numpy as np
-    import mlflow
     from pathlib import Path
 
     date_range = pd.date_range(start='2020-01-01', end='2020-01-31', freq='15min')
     data = {
-        "site": np.random.rand(len(date_range)) * 100,
-        "pv": np.random.rand(len(date_range)) * 100,
+        load_type: np.random.rand(len(date_range)) * 100,
         'temperature': np.random.rand(len(date_range)) * 100,
     }
     df = pd.DataFrame(data, index=date_range)
@@ -281,7 +279,7 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
                 "flyte_execution_id": execution_id,
                 "flyte_execution_date": execution_start_time,
                 "site_name": site_name,
-                "model_name":f"{load_type}_model"
+                "model_name": f"{load_type}_model"
             }
         )
 
