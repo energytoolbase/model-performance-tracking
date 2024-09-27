@@ -35,7 +35,19 @@ class SiteTrainingMetaData(DataClassJSONMixin):
 def capture_forecast_metrics(true_data: pd.DataFrame, forecast_data: pd.DataFrame, load_type: str, site_name: str):
     from sklearn.metrics import mean_squared_error, mean_absolute_error
     import mlflow
-
+    from evidently.report import Report
+    from evidently.metric_preset import RegressionPreset
+    import numpy as np
+    # Combine them into a dataframe
+    df = pd.DataFrame({
+        'target': true_data[load_type],
+        'prediction': forecast_data[load_type]
+    })
+    reference_data = df[['target', 'prediction']].copy()
+    reference_data["prediction"] = reference_data["prediction"] + np.random.normal(0, 0.05, size=len(forecast_data))
+    report = Report(metrics=[RegressionPreset()])
+    report.run(reference_data=reference_data, current_data=df[['target', 'prediction']])
+    report.save_html("regression_report.html")
     rmse = round(mean_squared_error(true_data[load_type], forecast_data[load_type], squared=False), 2)
     mae = round(mean_absolute_error(true_data[load_type], forecast_data[load_type]), 2)
 
@@ -53,6 +65,7 @@ def capture_forecast_metrics(true_data: pd.DataFrame, forecast_data: pd.DataFram
     with mlflow.start_run(run_id=run_id):
         mlflow.log_metric("rmse", rmse)
         mlflow.log_metric("mae", mae)
+        mlflow.log_artifact("regression_report.html")
 
 @task(container_image=ml_image_spec)
 def fetch_unseen_data(load_type: str, training_data_end_date: str, site_id: str) -> FlyteFile:
@@ -236,13 +249,6 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
     execution_id = flytekit.current_context().execution_id.name
     execution_start_time = flytekit.current_context().execution_date
 
-    runs = mlflow.search_runs(
-        experiment_names=["model-performance-tracking"],
-        filter_string=f"tags.mlflow.runName = "
-                      f"'{site_name}_{load_type}'"
-                      f"and tags.flyte_execution_id = '{execution_id}'",
-    )
-
     with mlflow.start_run(run_name=f"{site_name}_{load_type}"):
         mlflow.log_artifact("data_drift_report.html")
 
@@ -256,11 +262,13 @@ def capture_data_drifting_metrics(reference_data_file: FlyteFile, current_data_f
             {
                 "load_type": load_type,
                 "flyte_execution_id": execution_id,
-                "flyte_execution_date": execution_start_time,
+                "flyte_execution_time": execution_start_time,
                 "site_name": site_name,
                 "model_name": f"{load_type}_model"
             }
         )
+        mlflow.log_param("flyte_execution_id", execution_id)
+        mlflow.log_param("flyte_execution_time", execution_start_time)
 
     return "Data drift metrics captured"
 
